@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>测试</title>
+</head>
+<body>
+    <button id="rotate">旋转</button>
+    <br></br>
+    <canvas id="screen" style="border: 1px solid red;">
+        Your browser does not support the HTML5 canvas tag.
+    </canvas>
+</body>
+<script>
+    var ws;
+    try {
+        ws = new WebSocket('ws://127.0.0.1:56789/input');
+    } catch (error) {
+        console.error("WebSocket creation failed:", error);
+    }
+
+    var screenWidth = 360;
+    var screenHeight = 760;
+    var initRotate = 0;
+    var screen = document.getElementById('screen');
+    var ctx = screen.getContext("2d");
+    var shouldSendMoveEvent = false;
+    var wsOpen = false;
+
+    if (ws) {
+        ws.onopen = function(event) {
+            resizePicture();
+            wsOpen = true;
+        };
+
+        ws.onerror = function(event) {
+            console.error("WebSocket error observed:", event);
+        };
+
+        ws.onmessage = function(event) {
+            //console.log("Message received from server: ", event);
+            try {
+                var blob = new Blob([event.data], {type: "image/jpg"});
+                var img = new Image();
+                img.onload = function () {
+                    ctx.drawImage(img, 0, 0, screen.width, screen.height);
+                    window.URL.revokeObjectURL(img.src);
+                    img = null;
+                };
+                img.onerror = img.onabort = function () {
+                    img = null;
+                };
+                img.src = window.URL.createObjectURL(blob);
+            } catch (e) {
+                console.error("Error incoming message: ", e);
+            }
+        };
+
+        ws.onclose = function(event) {
+            console.log("WebSocket connection closed.", event);
+            wsOpen = false;
+        };
+    }
+
+    var down = function(event) {
+        shouldSendMoveEvent = true;
+        sendFingerPosition("finger_down", event);
+    };
+
+    var up = function(event) {
+        sendFingerPosition("finger_up", event)
+        shouldSendMoveEvent = false;
+    };
+
+    var move = function(event) {
+        if (shouldSendMoveEvent) {
+            sendFingerPosition("finger_move", event);
+        }
+    };
+
+    var sendFingerPosition = function(type, event) {
+        var x = event.pageX - screen.offsetLeft;
+        var y = event.pageY - screen.offsetTop;
+        var lastX = x;
+        var lastY = y;
+
+        var eventjson = '{"type":"'+type+'","x":'+lastX+',"y":'+lastY+'}';
+        sendEvent(eventjson);
+    };
+
+    var heartbeat = function() {
+        sendEvent('{"type":"heartbeat"}');
+    };
+
+    var resizeCanvas = function() {
+        screen.width = screenWidth;
+        screen.height = screenHeight;
+    };
+
+    var resizePicture = function() {
+        if (screenWidth <= screenHeight) {
+            sendEvent('{"type":"change_size", "w":'+screenWidth+', "h":'+screenHeight+', "r":'+initRotate+'}');
+        } else {
+            sendEvent('{"type":"change_size", "w":'+screenHeight+', "h":'+screenWidth+', "r":'+initRotate+'}');
+        }
+    };
+
+    var sendEvent = function(json) {
+        if (wsOpen) {
+            ws.send(json);
+        }
+    }
+
+    var buttonHandler = function(e) {
+        switch(e.target.id) {
+            case "rotate":
+                if (initRotate == 270) initRotate = 0;
+                else initRotate += 90;
+                var temp = screenHeight;
+                screenHeight = screenWidth;
+                screenWidth = temp;
+                resizePicture();
+                resizeCanvas();
+                break;
+        }
+    };
+
+    resizeCanvas();
+    screen.addEventListener('mousedown', down, false);
+    screen.addEventListener('mouseup', up, false);
+    screen.addEventListener('mousemove', move, false);
+    document.getElementById('rotate').addEventListener('click', buttonHandler, false);
+    setInterval(heartbeat, 3000);
+</script>
+</html>
